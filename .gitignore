@@ -1,0 +1,10 @@
+__pycache__/
+*.py[cod]
+*.exe
+*.dll
+*.pdb
+*.obj
+*.mod
+/patches.json
+/build/
+/Prison QoL Backup/

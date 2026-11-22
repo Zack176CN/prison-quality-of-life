@@ -1,0 +1,102 @@
+{
+  "code": "b8080000004885c9746d8179408b00000075644883b9880000000c755a4883b9900000000f755081797850414f44754781797c5f4e3031741281797c5f453031740981797c5f473031752c80b98400000000752381b9800000002d31324c741281b9800000002d31364c750bb810000000c3b80c000000c341817d408b000000750c498bcde876ffffff8bf0eb038b717c498d85d8000000e900000000448bc8488bcee858ffffff443bc8418bc10f8d00000000e900000000448bc8488bcee83cffffff443bc8418bc10f8d00000000e9000000008179408b000000751de81dffffffffc88b8c248800000085c90f48c83bc80f4fc8e9000000008b8c248800000085c9780a418b427cffc83bc87e06418b4a7cffc9e9000000008b477c817e408b000000750e4c8bc9488bcee8cefeffff498bc93bc30f8e00000000e9000000008b477c817e408b000000750e4c8bc9488bcee8a7feffff498bc93bd80f8c00000000e9000000008b477c817e408b000000750e4c8bc9488bcee880feffff498bc9448bc04585c0e9000000008b477c817e408b000000750e4c8bc9488bcee85bfeffff498bc9443bf80f8d00000000e9000000004883ec384533d2488d050000000048394424687507448b15000000004489542420e8000000004885c0745b8178408b00000075524883b8880000000075484883b8900000000f753e8b4c2420ba2d31324c83f90c740aba2d31364c83f910752648b950414f445f4e303148894878899080000000c680840000000048c780880000000c0000004883c438c3",
+  "procedures": {
+    "GetTruckCapacity": 0,
+    "LoadCapacity": 120,
+    "CheckGarbageCapacity": 157,
+    "CheckExportsCapacity": 185,
+    "SlotSearchLimit": 213,
+    "InitialInsertCheck": 283,
+    "InsertLoopCheck": 322,
+    "GetInsertCapacity": 361,
+    "CheckInsertSlot": 398,
+    "ConstructSupplyTruck": 438
+  },
+  "relocations": [
+    [
+      153,
+      0,
+      "AfterLoadCapacity"
+    ],
+    [
+      176,
+      0,
+      "SkipGarbageStop"
+    ],
+    [
+      181,
+      0,
+      "AfterCheckGarbageCapacity"
+    ],
+    [
+      204,
+      0,
+      "SkipExportsStop"
+    ],
+    [
+      209,
+      0,
+      "AfterCheckExportsCapacity"
+    ],
+    [
+      247,
+      0,
+      "AfterSlotSearchLimit"
+    ],
+    [
+      279,
+      0,
+      "AfterSlotSearchLimit"
+    ],
+    [
+      313,
+      0,
+      "RejectInsertSlot"
+    ],
+    [
+      318,
+      0,
+      "AfterInitialInsertCheck"
+    ],
+    [
+      352,
+      0,
+      "TryNextInsertSlot"
+    ],
+    [
+      357,
+      0,
+      "AfterInsertLoop"
+    ],
+    [
+      394,
+      0,
+      "AfterGetInsertCapacity"
+    ],
+    [
+      429,
+      0,
+      "RejectInsertSlot"
+    ],
+    [
+      434,
+      0,
+      "AfterCheckInsertSlot"
+    ],
+    [
+      448,
+      0,
+      "DispatchSpawnReturn"
+    ],
+    [
+      462,
+      0,
+      "PreferredTruckCapacity"
+    ],
+    [
+      472,
+      0,
+      "CreateNativeObject"
+    ]
+  ]
+}

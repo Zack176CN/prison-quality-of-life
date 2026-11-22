@@ -1,0 +1,75 @@
+{
+  "code": "4883ec28e800000000e8050000004883c428c34883ec38833d00000000000f8e9700000048833d00000000000f84890000004c8d1500000000488d0500000000488378101175354883781810722e488b004885c07426488d15000000004c8b1a4c391875174c8b5a084c395808750d8078106575074c8d15000000004c89542420b918000000488d1500000000458b024d8d4a08e8270000004c8b542420b928000000488d1500000000458b4204418b024d8d4c820ce8050000004883c438c34883ec68488954242048894c243048894c24384c894c24404c894424504c89442458488d542420e80000000084c07528488b0d00000000488d542420e800000000488bc8488d5424404533c049c7c1ffffffffe8000000004883c468c3",
+  "procedures": {
+    "ReloadDispatchLanguage": 0,
+    "RegisterDispatchTranslations": 19,
+    "AddDispatchTranslation": 192
+  },
+  "relocations": [
+    [
+      5,
+      0,
+      "LoadLanguageFile"
+    ],
+    [
+      25,
+      1,
+      "DispatchObjectKind"
+    ],
+    [
+      39,
+      1,
+      "LanguageMap"
+    ],
+    [
+      53,
+      0,
+      "EnglishStrings"
+    ],
+    [
+      60,
+      0,
+      "LanguagePreference"
+    ],
+    [
+      89,
+      0,
+      "ChineseLocale"
+    ],
+    [
+      120,
+      0,
+      "ChineseStrings"
+    ],
+    [
+      137,
+      0,
+      "DispatchNameKey"
+    ],
+    [
+      166,
+      0,
+      "DispatchTooltipKey"
+    ],
+    [
+      232,
+      0,
+      "HasTranslation"
+    ],
+    [
+      243,
+      0,
+      "LanguageMap"
+    ],
+    [
+      253,
+      0,
+      "GetOrInsertTranslation"
+    ],
+    [
+      276,
+      0,
+      "CopyTranslationValue"
+    ]
+  ]
+}

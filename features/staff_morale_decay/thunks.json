@@ -1,0 +1,86 @@
+{
+  "code": "4883ec288b829827000085c07e084c8bd2e855000000f30f2ac0f30f5cd84883c428e9000000004883ec284c8d9178daffff8b8110020000e82e00000085c07511f2410f108280000000f20f110500000000ff81100200004883c428c333c048890500000000e90000000085c00f8e840000004c391500000000757d3b05000000007c752b05000000007461f2410f108280000000f20f5c0500000000660f57d2660f2ec2726349bb000000000080964066490f6ed3660f2ec27231f20f5ec2f24c0f2cd84c3bd8732444011d00000000412bc3f2410f2ac3f20f59c2f20f580500000000f20f110500000000c301050000000033c0c333c04c891500000000c7050000000000000000f2410f108280000000f20f110500000000c3",
+  "procedures": {
+    "ApplyDeathPenalty": 0,
+    "RecordStaffDeath": 39,
+    "ResetOnLoad": 93,
+    "AdvanceRecovery": 107
+  },
+  "relocations": [
+    [
+      35,
+      0,
+      "ResumeMorale"
+    ],
+    [
+      78,
+      0,
+      "RecoveryStart"
+    ],
+    [
+      98,
+      0,
+      "TrackedWorld"
+    ],
+    [
+      103,
+      0,
+      "LoadVictory"
+    ],
+    [
+      118,
+      0,
+      "TrackedWorld"
+    ],
+    [
+      126,
+      0,
+      "ForgivenDeaths"
+    ],
+    [
+      134,
+      0,
+      "ForgivenDeaths"
+    ],
+    [
+      153,
+      0,
+      "RecoveryStart"
+    ],
+    [
+      205,
+      0,
+      "ForgivenDeaths"
+    ],
+    [
+      225,
+      0,
+      "RecoveryStart"
+    ],
+    [
+      233,
+      0,
+      "RecoveryStart"
+    ],
+    [
+      240,
+      0,
+      "ForgivenDeaths"
+    ],
+    [
+      252,
+      0,
+      "TrackedWorld"
+    ],
+    [
+      258,
+      4,
+      "ForgivenDeaths"
+    ],
+    [
+      279,
+      0,
+      "RecoveryStart"
+    ]
+  ]
+}
