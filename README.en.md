@@ -2,6 +2,8 @@
 
 [简体中文](README.md)
 
+<img src="docs/workshop-cover.png" alt="Bilingual Prison Quality of Life cover" width="420">
+
 A Windows patch manager for Prison Architect. It supports **Steam x64 build 10630057** with the stock executable, Tyr 1.5.0's default fixes, and those fixes with Tyr's optional staff-morale tweak. Apply your choices in the manager, then launch the game through Steam as usual.
 
 ## Download and installation

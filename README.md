@@ -2,6 +2,8 @@
 
 [English](README.en.md)
 
+<img src="docs/workshop-cover.png" alt="《生活与质量更新》的中英文封面" width="420">
+
 《监狱建筑师》的 Windows 补丁管理器。适用于 Steam x64 构建 **10630057**，支持原版、Tyr 1.5.0 默认修复，以及已额外启用 Tyr 员工士气衰减的配置。勾选所需功能并应用后，照常从 Steam 启动游戏。
 
 ## 下载和安装
