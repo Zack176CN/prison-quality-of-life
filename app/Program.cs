@@ -27,7 +27,8 @@ namespace PrisonQoL
             }
             catch (Exception error)
             {
-                MessageBox.Show(error.Message, "监狱建筑师体验补丁", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                MessageBox.Show(ManagerLanguage.Translate(error.Message), ManagerLanguage.Translate("监狱建筑师体验补丁"),
+                    MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
         }
     }

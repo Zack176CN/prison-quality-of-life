@@ -15,9 +15,11 @@ namespace PrisonQoL
         public bool RequiresUpgrade { get; private set; }
         public bool HasTyrStaffMorale { get; private set; }
         public HashSet<string> Enabled { get; private set; }
+        public int MapObjectPickerKey { get; private set; }
 
         internal InstallStatus(string gamePath, string baseName, string backupPath,
-            bool hasBackup, IEnumerable<string> enabled, bool hasTyrStaffMorale, bool requiresUpgrade = false)
+            bool hasBackup, IEnumerable<string> enabled, bool hasTyrStaffMorale, bool requiresUpgrade = false,
+            int mapObjectPickerKey = PatchCatalog.DefaultMapObjectPickerKey)
         {
             GamePath = gamePath;
             BaseName = baseName;
@@ -26,6 +28,7 @@ namespace PrisonQoL
             RequiresUpgrade = requiresUpgrade;
             HasTyrStaffMorale = hasTyrStaffMorale;
             Enabled = new HashSet<string>(enabled, StringComparer.Ordinal);
+            MapObjectPickerKey = mapObjectPickerKey;
         }
     }
 
@@ -53,6 +56,11 @@ namespace PrisonQoL
 
         public void Apply(string gameDirectory, IEnumerable<string> selected)
         {
+            ApplyWithPickerKey(gameDirectory, selected, null);
+        }
+
+        internal void ApplyWithPickerKey(string gameDirectory, IEnumerable<string> selected, int? mapObjectPickerKey)
+        {
             if (selected == null)
                 throw new ArgumentNullException("selected");
             var requested = new HashSet<string>(selected, StringComparer.Ordinal);
@@ -63,7 +71,10 @@ namespace PrisonQoL
             var initial = Resolve(gameDirectory);
             if (initial.Status.HasTyrStaffMorale && requested.Contains(PatchCatalog.StaffMoraleFeature))
                 throw new InvalidOperationException(PatchCatalog.StaffMoraleConflict);
-            if (!initial.Status.RequiresUpgrade && initial.Status.Enabled.SetEquals(requested))
+            int pickerKey = requested.Contains(PatchCatalog.MapObjectPicker)
+                ? mapObjectPickerKey ?? initial.Status.MapObjectPickerKey : PatchCatalog.DefaultMapObjectPickerKey;
+            if (!initial.Status.RequiresUpgrade && initial.Status.Enabled.SetEquals(requested) &&
+                initial.Status.MapObjectPickerKey == pickerKey)
                 return;
 
             var backupFolder = Path.GetDirectoryName(initial.Status.BackupPath);
@@ -75,7 +86,7 @@ namespace PrisonQoL
                 if (!DigestComparer.Equals(initial.InstalledHash, current.InstalledHash))
                     throw new IOException("游戏程序刚刚发生变化，请重新读取安装状态。");
 
-                var replacement = catalog.CreateImage(current.Build, current.BaseImage, requested);
+                var replacement = catalog.CreateImageWithPickerKey(current.Build, current.BaseImage, requested, pickerKey);
                 var replacementHash = PatchCatalog.Hash(replacement);
                 EnsureBackup(current.Status.BackupPath, current.BaseImage);
                 if (!DigestComparer.Equals(current.InstalledHash, replacementHash))
@@ -120,18 +131,22 @@ namespace PrisonQoL
                     var enabled = catalog.DetectFeatures(build, installed);
                     if (enabled != null)
                     {
-                        var expected = catalog.CreateImage(build, baseImage, enabled);
+                        int pickerKey = PatchCatalog.ReadMapObjectPickerKey(build, installed, enabled);
+                        var expected = catalog.CreateImageWithPickerKey(build, baseImage, enabled, pickerKey);
                         if (DigestComparer.Equals(PatchCatalog.Hash(expected), installedHash))
                         {
-                            var status = new InstallStatus(gamePath, build.Name, backup, true, enabled, build.HasTyrStaffMorale);
+                            var status = new InstallStatus(gamePath, build.Name, backup, true, enabled, build.HasTyrStaffMorale,
+                                mapObjectPickerKey: pickerKey);
                             return new ResolvedInstall(status, build, baseImage, installedHash);
                         }
                     }
 
-                    string[] legacyFeatures;
-                    if (build.TryGetLegacyFeatures(installedHash, out legacyFeatures))
+                    int legacyKey;
+                    var legacyFeatures = catalog.DetectPreviousFeatures(build, baseImage, installed, installedHash, out legacyKey);
+                    if (legacyFeatures != null)
                     {
-                        var status = new InstallStatus(gamePath, build.Name, backup, true, legacyFeatures, build.HasTyrStaffMorale, true);
+                        var status = new InstallStatus(gamePath, build.Name, backup, true, legacyFeatures, build.HasTyrStaffMorale,
+                            true, legacyKey);
                         return new ResolvedInstall(status, build, baseImage, installedHash);
                     }
                 }

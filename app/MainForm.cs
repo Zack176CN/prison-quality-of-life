@@ -24,9 +24,12 @@ namespace PrisonQoL
         private readonly PatchInstaller installer;
         private readonly Dictionary<string, CheckBox> featureBoxes =
             new Dictionary<string, CheckBox>(StringComparer.Ordinal);
+        private readonly List<Action> localizeControls = new List<Action>();
+        private readonly Button languageButton;
         private readonly TextBox directoryBox;
         private readonly Button detectButton;
         private readonly Button browseButton;
+        private readonly Button selectAllButton;
         private readonly Button applyButton;
         private readonly Button restoreButton;
         private readonly Label statusLabel;
@@ -36,8 +39,11 @@ namespace PrisonQoL
         private RadioButton preferredCapacity;
         private RadioButton fixedCapacity;
         private ComboBox capacityPicker;
+        private ComboBox mapObjectPickerShortcut;
         private readonly string[] fixedCapacityModes;
         private InstallStatus currentStatus;
+        private string statusMessage = String.Empty;
+        private object[] statusArguments = new object[0];
         private bool busy;
 
         public MainForm(PatchInstaller installer, string initialDirectory)
@@ -70,15 +76,31 @@ namespace PrisonQoL
             layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 46F));
             Controls.Add(layout);
 
-            var heading = new Panel { Dock = DockStyle.Fill, Margin = Padding.Empty };
-            heading.Controls.Add(new Label {
+            var heading = new TableLayoutPanel {
+                Dock = DockStyle.Fill, Margin = Padding.Empty, RowCount = 1, ColumnCount = 2
+            };
+            heading.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
+            heading.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 128F));
+            var headingText = new Panel { Dock = DockStyle.Fill, Margin = Padding.Empty };
+            headingText.Controls.Add(new Label {
                 Text = PatchTitle, ForeColor = Ink, Font = new Font(Font.FontFamily, 19F, FontStyle.Bold),
                 Location = new Point(0, 0), AutoSize = true
             });
-            heading.Controls.Add(new Label {
+            headingText.Controls.Add(new Label {
                 Text = "勾选功能并应用，之后可直接从 Steam 启动游戏。", ForeColor = Muted,
                 Location = new Point(1, 35), AutoSize = true
             });
+            heading.Controls.Add(headingText, 0, 0);
+            languageButton = CreateButton("English", false);
+            languageButton.AccessibleName = "切换语言";
+            languageButton.Anchor = AnchorStyles.Top | AnchorStyles.Right;
+            languageButton.Margin = new Padding(0, 2, 0, 0);
+            languageButton.Size = new Size(104, 34);
+            languageButton.Click += (sender, args) => {
+                ManagerLanguage.Toggle();
+                ApplyLanguage();
+            };
+            heading.Controls.Add(languageButton, 1, 0);
             layout.Controls.Add(heading, 0, 0);
 
             var location = new TableLayoutPanel {
@@ -108,6 +130,29 @@ namespace PrisonQoL
             location.Controls.Add(browseButton, 2, 1);
             layout.Controls.Add(location, 0, 1);
 
+            var featuresPanel = new TableLayoutPanel {
+                BackColor = Surface, Dock = DockStyle.Fill, Margin = Padding.Empty, ColumnCount = 1, RowCount = 2
+            };
+            featuresPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
+            featuresPanel.RowStyles.Add(new RowStyle(SizeType.Absolute, 39F));
+            featuresPanel.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
+            var featureActions = new TableLayoutPanel {
+                ColumnCount = 2, RowCount = 1, Dock = DockStyle.Fill, Margin = new Padding(13, 5, 13, 0)
+            };
+            featureActions.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
+            featureActions.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 104F));
+            featureActions.Controls.Add(new Label {
+                Text = "可选功能", ForeColor = Muted, Dock = DockStyle.Fill, Margin = Padding.Empty,
+                TextAlign = ContentAlignment.MiddleLeft
+            }, 0, 0);
+            selectAllButton = CreateButton("全选", false);
+            selectAllButton.AccessibleDescription = "选择两个分组中与当前游戏版本兼容的补丁。";
+            selectAllButton.Dock = DockStyle.Fill;
+            selectAllButton.Margin = Padding.Empty;
+            selectAllButton.Click += (sender, args) => SelectAllCompatibleFeatures();
+            featureActions.Controls.Add(selectAllButton, 1, 0);
+            featuresPanel.Controls.Add(featureActions, 0, 0);
+
             var featureScroll = new Panel {
                 BackColor = Surface, Dock = DockStyle.Fill, AutoScroll = true, Margin = Padding.Empty,
                 AccessibleName = "可选功能"
@@ -116,23 +161,14 @@ namespace PrisonQoL
                 ColumnCount = 1, Dock = DockStyle.Top, AutoSize = true, Margin = Padding.Empty,
                 Padding = new Padding(13, 5, 13, 5), GrowStyle = TableLayoutPanelGrowStyle.AddRows
             };
+            featureLayout.SizeChanged += (sender, args) => {
+                featureScroll.AutoScrollMinSize = new Size(0, featureLayout.Height);
+            };
             featureLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
-            bool addedDispatchGroup = false;
-            foreach (var feature in installer.FeatureIds)
-            {
-                if (!IsDispatchFeature(feature))
-                {
-                    AddFeature(featureLayout, feature);
-                    continue;
-                }
-                if (!addedDispatchGroup)
-                {
-                    AddDispatchGroup(featureLayout);
-                    addedDispatchGroup = true;
-                }
-            }
+            AddFeatureGroups(featureLayout);
             featureScroll.Controls.Add(featureLayout);
-            layout.Controls.Add(featureScroll, 0, 2);
+            featuresPanel.Controls.Add(featureScroll, 0, 1);
+            layout.Controls.Add(featuresPanel, 0, 2);
 
             var note = new Label {
                 Text = "应用前请保存并退出游戏。关闭施工补丁前，请先完成或取消已安排的相关施工。",
@@ -193,7 +229,64 @@ namespace PrisonQoL
             directoryBox.DragEnter += CheckDrop;
             directoryBox.DragDrop += async (sender, args) => await DropDirectoryAsync(args);
             AcceptButton = applyButton;
+            RegisterLocalizedControls(this);
+            ApplyLanguage();
             UpdateButtons();
+        }
+
+        private void RegisterLocalizedControls(Control control)
+        {
+            string text = control is TextBoxBase || control is ComboBox ? null : control.Text;
+            string name = control.AccessibleName;
+            string description = control.AccessibleDescription;
+            if (!String.IsNullOrEmpty(text) || name != null || description != null)
+                localizeControls.Add(() => {
+                    if (!String.IsNullOrEmpty(text))
+                        control.Text = ManagerLanguage.Translate(text);
+                    if (name != null)
+                        control.AccessibleName = ManagerLanguage.Translate(name);
+                    if (description != null)
+                        control.AccessibleDescription = ManagerLanguage.Translate(description);
+                });
+            foreach (Control child in control.Controls)
+                RegisterLocalizedControls(child);
+        }
+
+        private void ApplyLanguage()
+        {
+            SuspendLayout();
+            try
+            {
+                foreach (var localize in localizeControls)
+                    localize();
+                languageButton.Text = ManagerLanguage.IsEnglish ? "简体中文" : "English";
+                LocalizeOptions(mapObjectPickerShortcut, PatchCatalog.MapObjectPickerKeys.Select(DescribePickerKey));
+                LocalizeOptions(capacityPicker, fixedCapacityModes.Select(DescribeCapacityMode));
+                UpdateStaffMoraleHelp();
+                UpdateStatusText();
+            }
+            finally
+            {
+                ResumeLayout(true);
+            }
+        }
+
+        private static void LocalizeOptions(ComboBox control, IEnumerable<string> choices)
+        {
+            if (control == null)
+                return;
+            int selection = control.SelectedIndex;
+            control.BeginUpdate();
+            try
+            {
+                control.Items.Clear();
+                control.Items.AddRange(choices.Select(choice => ManagerLanguage.Translate(choice)).ToArray());
+                control.SelectedIndex = selection;
+            }
+            finally
+            {
+                control.EndUpdate();
+            }
         }
 
         private static Button CreateButton(string text, bool primary)
@@ -209,10 +302,41 @@ namespace PrisonQoL
             return control;
         }
 
+        private void AddFeatureGroups(TableLayoutPanel layout)
+        {
+            var features = installer.FeatureIds.ToArray();
+            AddFeatureHeading(layout, "体验优化");
+            foreach (var feature in features.Where(id => !IsRepairFeature(id) && !IsDispatchFeature(id))
+                .OrderBy(id => id == "logicBridgeSignalOptimization"))
+                AddFeature(layout, feature);
+            if (features.Any(IsDispatchFeature))
+                AddDispatchGroup(layout);
+            var repairs = features.Where(IsRepairFeature).ToArray();
+            if (repairs.Length == 0)
+                return;
+            AddFeatureHeading(layout, "补丁修复");
+            foreach (var feature in repairs)
+                AddFeature(layout, feature);
+        }
+
+        private void AddFeatureHeading(TableLayoutPanel layout, string title)
+        {
+            AppendFeatureRow(layout, new Label {
+                Text = title, ForeColor = Accent, Font = new Font(Font.FontFamily, 11F, FontStyle.Bold),
+                Dock = DockStyle.Fill, Margin = Padding.Empty, TextAlign = ContentAlignment.MiddleLeft
+            }, 32F);
+        }
+
+        private static bool IsRepairFeature(string id)
+        {
+            return id == PatchCatalog.StaffMoraleFeature || id == "reformProgramProgress";
+        }
+
         private void AddFeature(TableLayoutPanel layout, string id)
         {
             string title;
             string description;
+            bool fitDescription = false;
             switch (id)
             {
                 case "removeTreeStumps":
@@ -227,9 +351,30 @@ namespace PrisonQoL
                     title = "建门和墙前自动清理树木";
                     description = "墙线、单格门或双格门覆盖树木或树桩时，工人先清理，再开始施工。";
                     break;
+                case PatchCatalog.MapObjectPicker:
+                    title = "地图物件取样";
+                    description = "指向物件、墙壁或地板，按快捷键打开对应建造栏，并定位和高亮目标。";
+                    fitDescription = true;
+                    break;
+                case "pinyinSearch":
+                    title = "拼音搜索";
+                    description = "在物品、房间等建造栏的原版搜索框输入全拼或首字母。例如 jiaoshi 或 js 可找到「教室」。";
+                    fitDescription = true;
+                    break;
+                case "rightClickDeselect":
+                    title = "右键取消选中物品";
+                    description = "在地图上右键单击，游戏先按原版规则处理工单取消，再清除建造预览并保留建造栏。按住右键拖动仍沿用原版操作。";
+                    fitDescription = true;
+                    break;
                 case "reformProgramProgress":
                     title = "修复改造计划进度保存";
                     description = "保存「三振出局计划」和「鲜花疗法」的囚犯进度，下次活动时接着进行。";
+                    break;
+                case "logicBridgeSignalOptimization":
+                    title = "逻辑桥信号传播优化";
+                    description = "默认关闭。逻辑桥频繁向大片连线传播时可常驻。低负载建议关闭，收益尚无实测。保留原版信号和顺序。\r\n" +
+                        "同一大型电路档，原版 10 倍速两轮。模拟推进 +27.45%–34.81%，FPS +38.32%–46.93%，p95／p99 帧时间缩短 7.52–9.15／8.74–9.53 ms。";
+                    fitDescription = true;
                     break;
                 case BalancedPickupFeature:
                     title = "均衡取货";
@@ -237,7 +382,7 @@ namespace PrisonQoL
                     break;
                 case DispatchConsoleFeature:
                     title = "出货调度台";
-                    description = "物件栏建造，价格 200。进档后可手动排队或按积压加派，最多同时 5 辆。启用前请停用旧版调度台模组。";
+                    description = "物件栏建造，价格 200。可手动或按积压加派，最多同时 5 辆。设置随监狱存档保存。启用前请停用旧版调度台模组。";
                     break;
                 case PatchCatalog.StaffMoraleFeature:
                     title = "员工死亡士气惩罚逐渐消退";
@@ -249,8 +394,11 @@ namespace PrisonQoL
                     break;
             }
 
+            bool hasShortcut = id == PatchCatalog.MapObjectPicker;
             var row = new TableLayoutPanel {
-                ColumnCount = 1, RowCount = 2, Dock = DockStyle.Top, Height = 68, Margin = Padding.Empty,
+                ColumnCount = 1, RowCount = hasShortcut ? 3 : 2,
+                Dock = fitDescription ? DockStyle.Fill : DockStyle.Top,
+                Height = 68, Margin = Padding.Empty,
                 Padding = new Padding(0, 2, 0, 2), BackColor = Surface
             };
             row.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
@@ -262,19 +410,71 @@ namespace PrisonQoL
             };
             var help = new Label {
                 Text = description, Dock = DockStyle.Fill, ForeColor = Muted,
-                Margin = new Padding(21, 0, 3, 0)
+                Margin = new Padding(21, 0, 3, fitDescription ? 2 : 0)
             };
             row.Controls.Add(check, 0, 0);
             row.Controls.Add(help, 0, 1);
             if (id == PatchCatalog.StaffMoraleFeature)
                 staffMoraleHelp = help;
-            AppendFeatureRow(layout, row);
+            if (hasShortcut)
+                AddMapObjectPickerShortcut(row);
+            AppendFeatureRow(layout, row, hasShortcut ? 94F : 68F);
+            if (fitDescription)
+            {
+                RowStyle style = layout.RowStyles[layout.GetRow(row)];
+                MethodInvoker fitRowToDescription = () => {
+                    int width = help.ClientSize.Width;
+                    if (width <= 0)
+                        return;
+                    int height = help.GetPreferredSize(new Size(width, 0)).Height;
+                    float fixedHeight = row.RowStyles.Cast<RowStyle>()
+                        .Where(item => item.SizeType == SizeType.Absolute).Sum(item => item.Height);
+                    height += row.Padding.Vertical + help.Margin.Vertical + (int)Math.Ceiling(fixedHeight);
+                    if (style.Height != height)
+                        style.Height = height;
+                };
+                EventHandler queueFit = (sender, args) => {
+                    // Measure after the current layout pass so the scroll range uses the new row height.
+                    if (help.IsHandleCreated)
+                        help.BeginInvoke(fitRowToDescription);
+                };
+                help.HandleCreated += queueFit;
+                help.SizeChanged += queueFit;
+                help.FontChanged += queueFit;
+                help.TextChanged += queueFit;
+            }
             featureBoxes.Add(id, check);
             check.CheckedChanged += (sender, args) => {
                 if (id == DispatchConsoleFeature && !check.Checked && PreferredCapacitySelected)
                     fixedCapacity.Checked = true;
                 UpdateButtons();
             };
+        }
+
+        private void AddMapObjectPickerShortcut(TableLayoutPanel row)
+        {
+            var shortcutRow = new FlowLayoutPanel {
+                Dock = DockStyle.Fill, Margin = Padding.Empty, WrapContents = false
+            };
+            shortcutRow.Controls.Add(new Label {
+                Text = "快捷键", AutoSize = true, Margin = new Padding(21, 6, 8, 0)
+            });
+            mapObjectPickerShortcut = new ComboBox {
+                AccessibleName = "地图物件取样快捷键", DropDownStyle = ComboBoxStyle.DropDownList,
+                Width = 150, Margin = new Padding(0, 1, 0, 0)
+            };
+            mapObjectPickerShortcut.Items.AddRange(PatchCatalog.MapObjectPickerKeys.Select(DescribePickerKey).ToArray());
+            mapObjectPickerShortcut.SelectedIndex = 0;
+            mapObjectPickerShortcut.SelectedIndexChanged += (sender, args) => UpdateButtons();
+            shortcutRow.Controls.Add(mapObjectPickerShortcut);
+            AppendFeatureRow(row, shortcutRow, 30F);
+        }
+
+        private static string DescribePickerKey(int key)
+        {
+            if (key == PatchCatalog.DefaultMapObjectPickerKey)
+                return "鼠标中键";
+            return ((char)key).ToString();
         }
 
         private static bool IsDispatchFeature(string id)
@@ -386,7 +586,7 @@ namespace PrisonQoL
             if (busy)
                 return;
             using (var picker = new FolderBrowserDialog {
-                Description = "请选择包含 Prison Architect64.exe 的游戏目录",
+                Description = ManagerLanguage.Translate("请选择包含 Prison Architect64.exe 的游戏目录"),
                 ShowNewFolderButton = false
             })
             {
@@ -458,7 +658,7 @@ namespace PrisonQoL
             catch (Exception exception)
             {
                 SetInstalled(null);
-                SetStatus("Steam 游戏库检测失败。请选择游戏目录。 " + exception.Message, true);
+                SetStatus("Steam 游戏库检测失败。请选择游戏目录。 {0}", true, exception.Message);
             }
             finally
             {
@@ -531,6 +731,7 @@ namespace PrisonQoL
                 return;
             var path = directoryBox.Text;
             var selection = restore ? new string[0] : ReadSelection().ToArray();
+            int pickerKey = SelectedMapObjectPickerKey;
             SetBusy(true);
             SetStatus(restore ? "正在恢复原文件…" : "正在应用所选补丁…", false);
             try
@@ -539,11 +740,11 @@ namespace PrisonQoL
                 try
                 {
                     var updated = await Task.Run(() => {
-                        installer.Apply(path, selection);
+                        installer.ApplyWithPickerKey(path, selection, pickerKey);
                         return installer.Inspect(path);
                     });
                     SetInstalled(updated);
-                    if (updated.RequiresUpgrade || !updated.Enabled.SetEquals(selection))
+                    if (updated.RequiresUpgrade || !SelectionMatches(updated, selection, pickerKey))
                         throw new IOException("实际启用的补丁与所选项目不一致。请复查当前目录。");
                     SetStatus(selection.Length == 0 ? "已恢复应用前的版本。" : "已应用，可从 Steam 正常启动。", false);
                 }
@@ -589,22 +790,54 @@ namespace PrisonQoL
             }
         }
 
+        private int SelectedMapObjectPickerKey {
+            get {
+                return mapObjectPickerShortcut == null || mapObjectPickerShortcut.SelectedIndex < 0
+                    ? PatchCatalog.DefaultMapObjectPickerKey
+                    : PatchCatalog.MapObjectPickerKeys[mapObjectPickerShortcut.SelectedIndex];
+            }
+        }
+
+        private static bool SelectionMatches(InstallStatus status, IEnumerable<string> selection, int pickerKey)
+        {
+            return status.Enabled.SetEquals(selection) && (!status.Enabled.Contains(PatchCatalog.MapObjectPicker) ||
+                status.MapObjectPickerKey == pickerKey);
+        }
+
         private bool PreferredCapacitySelected { get { return preferredCapacity != null && preferredCapacity.Checked; } }
         private bool DispatchOptionsEnabled { get { return dispatchToggle == null || dispatchToggle.Checked; } }
+
+        private void SelectAllCompatibleFeatures()
+        {
+            if (busy || currentStatus == null)
+                return;
+            if (dispatchToggle != null)
+                dispatchToggle.Checked = true;
+            foreach (var check in featureBoxes.Values.Where(item => item.Enabled))
+                check.Checked = true;
+        }
 
         private void SetInstalled(InstallStatus status)
         {
             currentStatus = status;
             bool firstApplication = status != null && !status.HasBackup && status.Enabled.Count == 0;
+            bool dispatchConfigured = status != null && status.Enabled.Any(IsDispatchFeature);
             int fixedMode = status == null ? -1 :
                 Array.FindIndex(fixedCapacityModes, id => id != null && status.Enabled.Contains(id));
-            bool preferCapacity = preferredCapacity != null && fixedMode < 0;
+            bool keepUnselectedCapacity = dispatchConfigured && !status.Enabled.Any(PatchCatalog.IsTruckModeChoice);
+            bool preferCapacity = preferredCapacity != null && fixedMode < 0 && !keepUnselectedCapacity;
             foreach (var item in featureBoxes)
                 item.Value.Checked = status != null &&
                     (status.Enabled.Contains(item.Key) ||
-                     (item.Key == DispatchConsoleFeature && (firstApplication || preferCapacity)));
+                     (item.Key == DispatchConsoleFeature && (firstApplication || preferCapacity)) ||
+                     (item.Key == BalancedPickupFeature && !dispatchConfigured));
+            if (mapObjectPickerShortcut != null)
+            {
+                var installedKey = status == null ? PatchCatalog.DefaultMapObjectPickerKey : status.MapObjectPickerKey;
+                mapObjectPickerShortcut.SelectedIndex = Array.IndexOf(PatchCatalog.MapObjectPickerKeys, installedKey);
+            }
             if (capacityPicker != null)
-                capacityPicker.SelectedIndex = Math.Max(fixedMode, 0);
+                capacityPicker.SelectedIndex = keepUnselectedCapacity ? -1 : Math.Max(fixedMode, 0);
             if (preferredCapacity != null)
             {
                 if (preferCapacity)
@@ -613,16 +846,20 @@ namespace PrisonQoL
                     fixedCapacity.Checked = true;
             }
             if (dispatchToggle != null)
-                dispatchToggle.Checked = status != null && (status.Enabled.Any(IsDispatchFeature) ||
-                    firstApplication && featureBoxes.ContainsKey(DispatchConsoleFeature));
-            if (staffMoraleHelp != null)
-            {
-                var blocked = status != null && status.HasTyrStaffMorale;
-                staffMoraleHelp.Text = blocked ? PatchCatalog.StaffMoraleConflict : StaffMoraleDescription;
-                staffMoraleHelp.ForeColor = blocked ? Error : Muted;
-                featureBoxes[PatchCatalog.StaffMoraleFeature].AccessibleDescription = staffMoraleHelp.Text;
-            }
+                dispatchToggle.Checked = dispatchConfigured || firstApplication &&
+                    (featureBoxes.ContainsKey(DispatchConsoleFeature) || featureBoxes.ContainsKey(BalancedPickupFeature));
+            UpdateStaffMoraleHelp();
             UpdateButtons();
+        }
+
+        private void UpdateStaffMoraleHelp()
+        {
+            if (staffMoraleHelp == null)
+                return;
+            bool blocked = currentStatus != null && currentStatus.HasTyrStaffMorale;
+            staffMoraleHelp.Text = ManagerLanguage.Translate(blocked ? PatchCatalog.StaffMoraleConflict : StaffMoraleDescription);
+            staffMoraleHelp.ForeColor = blocked ? Error : Muted;
+            featureBoxes[PatchCatalog.StaffMoraleFeature].AccessibleDescription = staffMoraleHelp.Text;
         }
 
         private void DescribeInstalled()
@@ -631,9 +868,11 @@ namespace PrisonQoL
             {
                 var count = currentStatus.Enabled.Count;
                 if (currentStatus.RequiresUpgrade)
-                    SetStatus("检测到旧版补丁。点击「应用」可升级，已选功能会保留。", false);
+                    SetStatus("检测到旧版补丁。点击「应用」保留现有勾选并移除已停用的项目。", false);
+                else if (count == 0)
+                    SetStatus("{0}，未启用补丁", false, currentStatus.BaseName);
                 else
-                    SetStatus(currentStatus.BaseName + (count == 0 ? "，未启用补丁" : "，已启用 " + count + " 项补丁"), false);
+                    SetStatus("{0}，已启用 {1} 项补丁", false, currentStatus.BaseName, count);
             }
         }
 
@@ -661,27 +900,42 @@ namespace PrisonQoL
             }
             if (capacityPicker != null)
                 capacityPicker.Enabled = ready && useDispatch && !PreferredCapacitySelected;
+            if (mapObjectPickerShortcut != null)
+                mapObjectPickerShortcut.Enabled = ready && featureBoxes[PatchCatalog.MapObjectPicker].Checked;
+            selectAllButton.Enabled = ready;
             detectButton.Enabled = !busy;
             browseButton.Enabled = !busy;
             refreshLink.Enabled = !busy && !String.IsNullOrWhiteSpace(directoryBox.Text);
-            applyButton.Enabled = ready && (currentStatus.RequiresUpgrade || !currentStatus.Enabled.SetEquals(ReadSelection()));
+            applyButton.Enabled = ready && (currentStatus.RequiresUpgrade ||
+                !SelectionMatches(currentStatus, ReadSelection(), SelectedMapObjectPickerKey));
             applyButton.BackColor = applyButton.Enabled ? Accent : DisabledAccent;
             applyButton.FlatAppearance.BorderColor = applyButton.BackColor;
-            restoreButton.Enabled = ready && currentStatus.HasBackup && currentStatus.Enabled.Count > 0;
+            restoreButton.Enabled = ready && currentStatus.HasBackup &&
+                (currentStatus.Enabled.Count > 0 || currentStatus.RequiresUpgrade);
         }
 
-        private void SetStatus(string message, bool error)
+        private void SetStatus(string message, bool error, params object[] arguments)
         {
-            statusLabel.Text = message;
+            statusMessage = message;
+            statusArguments = arguments;
             statusLabel.ForeColor = error ? Error : Muted;
-            statusLabel.AccessibleDescription = message;
+            UpdateStatusText();
+        }
+
+        private void UpdateStatusText()
+        {
+            var translatedArguments = statusArguments.Select(value => value is string
+                ? ManagerLanguage.Translate((string)value) : value).ToArray();
+            statusLabel.Text = ManagerLanguage.Translate(statusMessage, translatedArguments);
+            statusLabel.AccessibleDescription = statusLabel.Text;
         }
 
         private void ShowProblem(Exception exception, bool showDialog)
         {
             SetStatus(exception.Message, true);
             if (showDialog)
-                MessageBox.Show(this, exception.Message, "补丁操作未完成", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                MessageBox.Show(this, statusLabel.Text, ManagerLanguage.Translate("补丁操作未完成"),
+                    MessageBoxButtons.OK, MessageBoxIcon.Warning);
         }
     }
 }

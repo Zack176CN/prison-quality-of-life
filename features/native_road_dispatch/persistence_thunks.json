@@ -1,0 +1,79 @@
+{
+  "code": "4883ec28e80000000048391d0000000075634c8d1500000000418b52108b0d0000000033c083f90c740c83f910750cb800000004eb05b80000000285d2750985c07432ba000208000bc20d0000004089442420498bce488d1500000000e8000000004885c0740ec74020010000008b5424208950244883c428c34883ec28e8000000004c8d150000000049c7020000000041c7421000000000c705000000000000000048893500000000498bcd488d1500000000e8000000004885c0746383782001755d8b40248bd081e2000000f881fa00000040754a8bc8c1e91983e10383f903743d894c24200fb6c80fb6d4448bc041c1e8104181e0ff000000448bc841c1e9184183e101e80000000085c074118b4c24208d048d080000008905000000004883c428c3",
+  "procedures": {
+    "SaveDispatchPreferences": 0,
+    "LoadDispatchPreferences": 122
+  },
+  "relocations": [
+    [
+      5,
+      0,
+      "WriteWorldProperties"
+    ],
+    [
+      12,
+      0,
+      "DispatchPreferencesWorld"
+    ],
+    [
+      21,
+      0,
+      "DispatchState"
+    ],
+    [
+      31,
+      0,
+      "PreferredTruckCapacity"
+    ],
+    [
+      89,
+      0,
+      "DispatchSaveKey"
+    ],
+    [
+      94,
+      0,
+      "InsertSaveProperty"
+    ],
+    [
+      127,
+      0,
+      "ReadWorldProperties"
+    ],
+    [
+      134,
+      0,
+      "DispatchState"
+    ],
+    [
+      155,
+      4,
+      "PreferredTruckCapacity"
+    ],
+    [
+      166,
+      0,
+      "DispatchPreferencesWorld"
+    ],
+    [
+      176,
+      0,
+      "DispatchSaveKey"
+    ],
+    [
+      181,
+      0,
+      "FindSaveProperty"
+    ],
+    [
+      264,
+      0,
+      "StoreDispatchConfiguration"
+    ],
+    [
+      285,
+      0,
+      "PreferredTruckCapacity"
+    ]
+  ]
+}

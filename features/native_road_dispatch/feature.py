@@ -13,7 +13,7 @@ from features.long_truck_fleet.capacity import MODE_HOOK
 UPDATE_CALL = 0x733FF3
 BACKLOG_CAPTURE = 0x7347EB
 WORLD_CONSTRUCTOR = 0x7B3650
-STATE_SIZE = 0x60
+STATE_SIZE = 0x68
 SYMBOLS = {
     "Game": 0xD57900,
     "RunNativeUpdate": 0x7352E0,
@@ -41,6 +41,7 @@ def apply(image: PatchImage, console_kind_rva: int | None = None) -> dict[str, i
         "DispatchObjectKind": console_kind_rva,
         "PreferredTruckCapacity": state + 0x40,
         "FleetWorldEpoch": state + 0x44,
+        "DispatchPreferencesWorld": state + 0x60,
     }
     payload = json.loads(Path(__file__).with_name("thunks.json").read_text(encoding="utf-8"))
     code = bytes.fromhex(payload["code"])
@@ -73,4 +74,5 @@ def apply(image: PatchImage, console_kind_rva: int | None = None) -> dict[str, i
         "LongTruckMode": MODE_HOOK,
         "PreferredTruckCapacity": state + 0x40,
         "FleetWorldEpoch": state + 0x44,
+        "DispatchPreferencesWorld": state + 0x60,
     }

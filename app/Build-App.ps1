@@ -20,10 +20,12 @@ if (-not (Test-Path -LiteralPath $catalog -PathType Leaf)) {
 }
 $manifest = Join-Path $PSScriptRoot 'PrisonQoL.manifest'
 $tyrNotice = Join-Path $project 'features/staff_morale_decay/TYR-LICENSE.txt'
+$unicodeNotice = Join-Path $project 'features/pinyin_search/LICENSE-UNICODE.txt'
 $compilerArgs = @(
     '/nologo', '/target:winexe', '/platform:x64', '/optimize+', '/codepage:65001',
     "/out:$OutputPath", "/win32manifest:$manifest", "/resource:$catalog,PrisonQoL.patches.json",
     "/resource:$tyrNotice,PrisonQoL.Tyr-MIT.txt",
+    "/resource:${unicodeNotice},PrisonQoL.Unicode.txt",
     '/reference:System.Windows.Forms.dll', '/reference:System.Drawing.dll', '/reference:System.Web.Extensions.dll'
 )
 $sourceFiles = @(Get-ChildItem -LiteralPath $PSScriptRoot -Filter '*.cs' -File | Sort-Object Name | ForEach-Object FullName)

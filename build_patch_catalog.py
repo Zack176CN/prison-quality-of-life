@@ -8,13 +8,14 @@ import hashlib
 import json
 from pathlib import Path
 
-from patch_image import PatchImage
+from patch_image import PatchImage, align
 
 
 HERE = Path(__file__).resolve().parent
 STAFF_MORALE = "staffDeathMoraleDecay"
 TRUCK_CAPACITIES = ("truckCapacity8", "truckCapacity12", "truckCapacity16")
 LONG_TRUCK_FLEET = "longTruckFleet"
+MAP_OBJECT_PICKER = "mapObjectPicker"
 BUILDS = {
     "steam": (
         "cc460fc435f2af4b1165f32cadde62b7943890ec8c9b2994e9f120830b2de1d9",
@@ -66,6 +67,10 @@ def registered_features():
     from features.staff_morale_decay.feature import apply as decay_staff_morale
     from features.native_road_dispatch.console import apply as add_native_dispatch
     from features.reform_program_progress.feature import apply as retain_reform_progress
+    from features.logic_bridge.feature import apply as optimize_logic_bridge
+    from features.map_object_picker.feature import apply as pick_map_object
+    from features.pinyin_search.feature import apply as search_by_pinyin
+    from features.right_click_deselect.feature import apply as deselect_on_right_click
 
     def replace_doors(image):
         recover_old_door = replace_with_door(image)
@@ -79,6 +84,10 @@ def registered_features():
         "nativeRoadDispatch": (add_native_dispatch,),
         STAFF_MORALE: (decay_staff_morale,),
         "reformProgramProgress": (retain_reform_progress,),
+        "logicBridgeSignalOptimization": (optimize_logic_bridge,),
+        MAP_OBJECT_PICKER: (pick_map_object,),
+        "pinyinSearch": (search_by_pinyin,),
+        "rightClickDeselect": (deselect_on_right_click,),
     }
 
 
@@ -113,6 +122,7 @@ def generate_build(build: str, source: bytes, features: dict) -> dict:
     tyr_staff_morale_installed = build == "tyr"
     by_feature = {}
     dispatch = None
+    picker_key_rva = None
     for feature, apply_steps in features.items():
         if tyr_staff_morale_installed and feature == STAFF_MORALE:
             continue
@@ -121,6 +131,8 @@ def generate_build(build: str, source: bytes, features: dict) -> dict:
             bindings = apply(image)
             if feature == "nativeRoadDispatch":
                 dispatch = bindings
+            elif feature == MAP_OBJECT_PICKER:
+                picker_key_rva = bindings
         writes = image.edits[start:]
         if not writes:
             raise ValueError(f"No changes were registered for {feature} on {build}")
@@ -151,6 +163,11 @@ def generate_build(build: str, source: bytes, features: dict) -> dict:
         by_feature[variant] = [edit(*write) for write in raw_edits]
 
     output = image.finish()
+    if picker_key_rva is None:
+        raise ValueError(f"Missing map object picker key slot on {build}")
+    picker_key_offset = align(len(source), image.file_alignment) + picker_key_rva - image.new_section_rva
+    if output[picker_key_offset:picker_key_offset + 4] != b"\x04\x00\x00\x00":
+        raise ValueError(f"Invalid default map object picker key on {build}")
     fixed_base = bytearray(output)
     for offset, before, _ in long_truck_edits:
         fixed_base[offset:offset + len(before)] = before
@@ -185,6 +202,7 @@ def generate_build(build: str, source: bytes, features: dict) -> dict:
         "append": encode(tail),
         "appendFromSource": source_span,
         "features": by_feature,
+        "mapObjectPickerKeyOffset": picker_key_offset,
         "tyrStaffMoraleInstalled": tyr_staff_morale_installed,
     }
 
@@ -193,26 +211,49 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--steam", type=Path, required=True, help="Windows Steam 10630057 stock executable")
     parser.add_argument("--tyr", type=Path, required=True, help="Observed Tyr 1.5.0 default build, with or without its staff morale tweak")
+    parser.add_argument("--legacy-output-hashes", type=Path, default=HERE / "legacy_output_hashes.json",
+                        help="Existing output hashes and the prior feature selections they represent")
     parser.add_argument("--output", type=Path, default=HERE / "patches.json")
     args = parser.parse_args()
     features = registered_features()
-    legacy_outputs = json.loads((HERE / "legacy_output_hashes.json").read_text(encoding="utf-8"))
+    feature_order = [*features, *TRUCK_CAPACITIES, LONG_TRUCK_FLEET]
+    available = set(feature_order)
+    legacy_outputs = json.loads(args.legacy_output_hashes.read_text(encoding="utf-8"))
+    previous_dispatch_layout = json.loads((HERE / "legacy_dispatch_layout.json").read_text(encoding="utf-8"))
+    previous_map_picker_layout = json.loads((HERE / "legacy_map_picker_layout.json").read_text(encoding="utf-8"))
+    previous_map_picker_toolbar_layout = json.loads((HERE / "legacy_map_picker_toolbar_layout.json").read_text(encoding="utf-8"))
+    previous_map_picker_material_layout = json.loads((HERE / "legacy_map_picker_material_layout.json").read_text(encoding="utf-8"))
+    previous_map_picker_focus_layout = json.loads((HERE / "legacy_map_picker_focus_layout.json").read_text(encoding="utf-8"))
+    previous_pinyin_search_layout = json.loads((HERE / "legacy_pinyin_search_layout.json").read_text(encoding="utf-8"))
+    previous_dispatch_save_layout = json.loads((HERE / "legacy_dispatch_save_layout.json").read_text(encoding="utf-8"))
+    previous_layout = json.loads((HERE / "legacy_performance_layout.json").read_text(encoding="utf-8"))
     signature_path = HERE / "features/staff_morale_decay/tyr_signatures.json"
     signature = json.loads(signature_path.read_text(encoding="utf-8"))
     sources = {"steam": args.steam.read_bytes(), **tyr_variants(args.tyr.read_bytes(), signature)}
     builds = []
     for build in BUILDS:
-        record = generate_build(build, sources[build], features)
-        record["legacyOutputs"] = legacy_outputs.get(record["sourceSha256"], {})
+        source = sources[build]
+        record = generate_build(build, source, features)
+        record["legacyOutputs"] = {
+            digest: [id for id in selection if id in available]
+            for digest, selection in legacy_outputs.get(record["sourceSha256"], {}).items()
+        }
         builds.append(record)
+
     catalog = {
         "schema": 1,
-        "featureOrder": [*features, *TRUCK_CAPACITIES, LONG_TRUCK_FLEET],
+        "featureOrder": feature_order,
         "tyrStaffMoraleSignatures": [
             {"offset": row["offset"], "variants": [encode(bytes.fromhex(value)) for value in (row["replace"], *row["superseded"])]}
             for row in signature
         ],
         "builds": builds,
+        "previousCatalogs": [
+            previous_pinyin_search_layout, previous_map_picker_focus_layout, previous_map_picker_material_layout,
+            previous_map_picker_toolbar_layout, previous_map_picker_layout,
+            previous_dispatch_save_layout, previous_dispatch_layout,
+        ],
+        "previousCatalog": previous_layout,
     }
     args.output.write_text(json.dumps(catalog, indent=2) + "\n", encoding="utf-8")
 

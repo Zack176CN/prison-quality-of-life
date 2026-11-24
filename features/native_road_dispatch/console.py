@@ -1,6 +1,6 @@
 """Assemble the native dispatch console, artwork, menu, and scheduler."""
 
-from . import artwork, feature, language, registration, ui
+from . import artwork, feature, language, persistence, registration, ui
 
 
 def apply(image) -> dict[str, int]:
@@ -16,4 +16,5 @@ def apply(image) -> dict[str, int]:
     for change in (*language_edits, *registration_edits):
         image.patch(*change)
     ui.prepare(image, symbols)
+    persistence.apply(image, symbols)
     return symbols

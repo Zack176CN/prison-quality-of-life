@@ -12,6 +12,7 @@ EXTERN NativeWastePermission:PROC
 EXTERN NativeExportsPermission:PROC
 EXTERN PreferredTruckCapacity:DWORD
 EXTERN FleetWorldEpoch:DWORD
+EXTERN DispatchPreferencesWorld:QWORD
 EXTERN ContinueWorldConstruction:PROC
 EXTERN MaterialDefCount:DWORD
 EXTERN MaterialDefTable:QWORD
@@ -20,6 +21,7 @@ PUBLIC DispatchNativeUpdate
 PUBLIC CollectDispatchBacklog
 PUBLIC EnqueueNativeDispatch
 PUBLIC ConfigureNativeDispatch
+PUBLIC StoreDispatchConfiguration
 PUBLIC GetNativeDispatchState
 PUBLIC HasNativeRoad
 PUBLIC ResetDispatchForWorldConstruction
@@ -90,6 +92,23 @@ EnqueueNativeDispatch ENDP
 
 ; ECX=minutes (0/15/30/60), EDX=truck cap (1..5), R8D=stacks (1..64), R9D=balance (0/1).
 ConfigureNativeDispatch PROC
+    test r9d, r9d
+    jz StoreDispatchConfiguration
+    cmp BYTE PTR [NativeWastePermission], 0E9h
+    jne checkSavedBalance
+    cmp BYTE PTR [NativeExportsPermission], 0E9h
+    je StoreDispatchConfiguration
+checkSavedBalance:
+    ; Allow the other controls to retain a saved preference while balance is disabled.
+    lea rax, DispatchState
+    test DWORD PTR [rax+Configuration], 01000000h
+    jnz StoreDispatchConfiguration
+    xor eax, eax
+    ret
+ConfigureNativeDispatch ENDP
+
+; Validate before publishing, including when loading a saved, inactive balance setting.
+StoreDispatchConfiguration PROC
     xor eax, eax
     test ecx, ecx
     jz intervalValid
@@ -110,13 +129,6 @@ intervalValid:
     inc r8d
     cmp r9d, 1
     ja configurationDone
-    test r9d, r9d
-    jz packConfiguration
-    cmp BYTE PTR [NativeWastePermission], 0E9h
-    jne configurationDone
-    cmp BYTE PTR [NativeExportsPermission], 0E9h
-    jne configurationDone
-packConfiguration:
     shl edx, 8
     shl r8d, 16
     shl r9d, 24
@@ -128,7 +140,7 @@ packConfiguration:
     mov eax, 1
 configurationDone:
     ret
-ConfigureNativeDispatch ENDP
+StoreDispatchConfiguration ENDP
 
 GetNativeDispatchState PROC
     lea rax, DispatchState
@@ -192,7 +204,6 @@ nextConsoleCandidate:
     jl findActiveConsole
 noActiveConsole:
     mov DWORD PTR [r11+ActiveConsole], 0
-    mov DWORD PTR [PreferredTruckCapacity], 0
     xor eax, eax
     xchg DWORD PTR [r11+PendingCount], eax
     mov DWORD PTR [r11+AutoInterval], -1
@@ -388,14 +399,22 @@ setStatus:
     jmp nativeUpdate
 
 resetWorld:
-    mov QWORD PTR [r11+WorldPointer], 0
+    ; Preserve preferences already read by the stock load before its first tick.
+    cmp QWORD PTR [r11+WorldPointer], r10
+    je clearOldPreferences
+    cmp QWORD PTR [DispatchPreferencesWorld], r10
+    je resetTransientState
+clearOldPreferences:
+    mov DWORD PTR [r11+Configuration], 0
     mov DWORD PTR [PreferredTruckCapacity], 0
+resetTransientState:
+    mov QWORD PTR [DispatchPreferencesWorld], r10
+    mov QWORD PTR [r11+WorldPointer], 0
     lock inc DWORD PTR [FleetWorldEpoch]
     mov DWORD PTR [r11+ActiveConsole], 0
     mov DWORD PTR [r11+LastMinute], ecx
     xor eax, eax
     xchg DWORD PTR [r11+PendingCount], eax
-    mov DWORD PTR [r11+Configuration], 0
     mov DWORD PTR [r11+AutoInterval], -1
     mov DWORD PTR [r11+DispatchStatus], 0
     mov DWORD PTR [r11+NextCategory], 0
@@ -532,6 +551,7 @@ ResetDispatchForWorldConstruction PROC
     mov QWORD PTR [rsp+8], rcx  ; Displaced instruction at the constructor entry.
     lea r11, DispatchState
     mov QWORD PTR [r11+WorldPointer], 0
+    mov QWORD PTR [DispatchPreferencesWorld], rcx
     mov DWORD PTR [r11+ActiveConsole], 0
     xor eax, eax
     xchg DWORD PTR [r11+PendingCount], eax

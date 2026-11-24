@@ -17,14 +17,20 @@ namespace PrisonQoL
         internal const string TruckCapacity16 = "truckCapacity16";
         internal const string LongTruckFleet = "longTruckFleet";
         internal const string NativeRoadDispatch = "nativeRoadDispatch";
+        internal const string MapObjectPicker = "mapObjectPicker";
+        internal const int DefaultMapObjectPickerKey = 4;
+        internal static readonly int[] MapObjectPickerKeys = new[] { DefaultMapObjectPickerKey }
+            .Concat("IJKLMNUVY".Select(key => (int)key)).ToArray();
         private readonly string[] featureIds;
         private readonly Build[] builds;
+        private readonly ILookup<string, Build> previousBuilds;
         private readonly OffsetSignature[] tyrStaffMorale;
 
-        private PatchCatalog(string[] ids, Build[] knownBuilds, SignatureRecord[] signatures)
+        private PatchCatalog(string[] ids, Build[] knownBuilds, Build[] previous, SignatureRecord[] signatures)
         {
             featureIds = ids;
             builds = knownBuilds;
+            previousBuilds = previous.ToLookup(build => build.SourceHash, StringComparer.Ordinal);
             tyrStaffMorale = (signatures ?? new SignatureRecord[0]).Select(row => new OffsetSignature(row)).ToArray();
         }
 
@@ -37,14 +43,30 @@ namespace PrisonQoL
             {
                 var serializer = new JavaScriptSerializer { MaxJsonLength = 16 * 1024 * 1024 };
                 var data = serializer.Deserialize<CatalogRecord>(reader.ReadToEnd());
-                if (data == null || data.schema != 1 || data.featureOrder == null || data.builds == null ||
-                    data.builds.Length == 0 || data.featureOrder.Length == 0 ||
-                    data.featureOrder.Any(String.IsNullOrEmpty) ||
-                    data.featureOrder.Distinct(StringComparer.Ordinal).Count() != data.featureOrder.Length)
-                    throw new InvalidDataException("补丁数据格式不受支持。");
-                var knownBuilds = data.builds.Select(record => new Build(record, data.featureOrder)).ToArray();
-                return new PatchCatalog(data.featureOrder, knownBuilds, data.tyrStaffMoraleSignatures);
+                var knownBuilds = LoadBuilds(data);
+                var previousCatalogs = data.previousCatalogs ?? new CatalogRecord[0];
+                var previous = previousCatalogs.SelectMany(LoadBuilds);
+                if (data.previousCatalog != null)
+                    previous = previous.Concat(LoadBuilds(data.previousCatalog));
+                var previousBuilds = previous.ToArray();
+                if (previousBuilds.Any(old => !knownBuilds.Any(current => current.SourceHash == old.SourceHash &&
+                    current.SourceLength == old.SourceLength && current.HasTyrStaffMorale == old.HasTyrStaffMorale)))
+                    throw new InvalidDataException("旧版补丁布局与支持的游戏版本不一致。");
+                return new PatchCatalog(data.featureOrder, knownBuilds, previousBuilds, data.tyrStaffMoraleSignatures);
             }
+        }
+
+        private static Build[] LoadBuilds(CatalogRecord data)
+        {
+            if (data == null || data.schema != 1 || data.featureOrder == null || data.builds == null ||
+                data.builds.Length == 0 || data.featureOrder.Length == 0 || data.featureOrder.Any(String.IsNullOrEmpty) ||
+                data.featureOrder.Distinct(StringComparer.Ordinal).Count() != data.featureOrder.Length)
+                throw new InvalidDataException("补丁数据格式不受支持。");
+            var optionalFeature = String.IsNullOrEmpty(data.optionalFeature) ? null : data.optionalFeature;
+            if ((optionalFeature != null && !data.featureOrder.Contains(optionalFeature)) ||
+                data.builds.Any(record => record == null || (record.optionalLayout != null) != (optionalFeature != null)))
+                throw new InvalidDataException("附加补丁布局与功能列表不一致。");
+            return data.builds.Select(record => new Build(record, data.featureOrder, optionalFeature)).ToArray();
         }
 
         public Build FindBase(byte[] source)
@@ -60,6 +82,39 @@ namespace PrisonQoL
         }
 
         public HashSet<string> DetectFeatures(Build build, byte[] current)
+        {
+            if (build.OptionalLayout != null)
+            {
+                var detected = DetectLayoutFeatures(build.OptionalLayout, current);
+                if (detected != null && detected.Contains(build.OptionalFeature))
+                    return detected;
+            }
+            return DetectLayoutFeatures(build, current);
+        }
+
+        internal IEnumerable<string> DetectPreviousFeatures(Build build, byte[] source, byte[] current, string checksum,
+            out int mapObjectPickerKey)
+        {
+            mapObjectPickerKey = DefaultMapObjectPickerKey;
+            string[] known;
+            if (build.TryGetLegacyFeatures(checksum, out known))
+                return known;
+            foreach (var previous in previousBuilds[build.SourceHash])
+            {
+                var enabled = DetectFeatures(previous, current);
+                if (enabled == null)
+                    continue;
+                int previousKey = ReadMapObjectPickerKey(previous, current, enabled);
+                if (Hash(CreateImageWithPickerKey(previous, source, enabled, previousKey)) != checksum)
+                    continue;
+                if (featureIds.Contains(MapObjectPicker))
+                    mapObjectPickerKey = previousKey;
+                return featureIds.Where(enabled.Contains);
+            }
+            return null;
+        }
+
+        private static HashSet<string> DetectLayoutFeatures(Build build, byte[] current)
         {
             if (current.Length != build.SourceLength + build.OutputTailLength) return null;
             var enabled = new HashSet<string>(StringComparer.Ordinal);
@@ -81,7 +136,19 @@ namespace PrisonQoL
             if ((activeModes.Length == 0 && !MatchesTruckMode(current, build, new Edit[0])) ||
                 TruckSelectionError(enabled) != null)
                 return null;
+            if (enabled.Contains(MapObjectPicker) &&
+                !MapObjectPickerKeys.Contains(BitConverter.ToInt32(current, build.MapObjectPickerKeyOffset.Value)))
+                return null;
             return enabled.Count == 0 ? null : enabled;
+        }
+
+        internal static int ReadMapObjectPickerKey(Build build, byte[] image, HashSet<string> enabled)
+        {
+            if (!enabled.Contains(MapObjectPicker))
+                return DefaultMapObjectPickerKey;
+            if (build.OptionalLayout != null && enabled.Contains(build.OptionalFeature))
+                build = build.OptionalLayout;
+            return BitConverter.ToInt32(image, build.MapObjectPickerKeyOffset.Value);
         }
 
         private static bool MatchesTruckMode(byte[] image, Build build, Edit[] activeEdits)
@@ -133,9 +200,16 @@ namespace PrisonQoL
 
         public byte[] CreateImage(Build build, byte[] source, IEnumerable<string> selected)
         {
+            return CreateImageWithPickerKey(build, source, selected, DefaultMapObjectPickerKey);
+        }
+
+        internal byte[] CreateImageWithPickerKey(Build build, byte[] source, IEnumerable<string> selected, int pickerKey)
+        {
             if (build == null || source == null || source.Length != build.SourceLength || Hash(source) != build.SourceHash)
                 throw new InvalidDataException("源游戏文件已变化，应用已取消。");
             var enabled = new HashSet<string>(selected, StringComparer.Ordinal);
+            if (build.OptionalLayout != null && enabled.Contains(build.OptionalFeature))
+                build = build.OptionalLayout;
             string truckSelectionError = TruckSelectionError(enabled);
             if (truckSelectionError != null)
                 throw new InvalidOperationException(truckSelectionError);
@@ -143,6 +217,8 @@ namespace PrisonQoL
                 throw new InvalidOperationException(StaffMoraleConflict);
             if (enabled.Any(id => !build.Features.ContainsKey(id)))
                 throw new InvalidDataException("所选功能不在当前游戏版本的补丁数据中。");
+            if (enabled.Contains(MapObjectPicker) && !MapObjectPickerKeys.Contains(pickerKey))
+                throw new ArgumentOutOfRangeException("pickerKey", "请选择支持的地图物件取样快捷键。");
             if (enabled.Count == 0) return source;
 
             var edits = build.CommonEdits.Concat(enabled.SelectMany(id => build.Features[id])).OrderBy(edit => edit.Offset);
@@ -169,6 +245,8 @@ namespace PrisonQoL
                 if (Hash(image) != expectedHash)
                     throw new InvalidDataException("已生成的游戏文件未通过校验。");
             }
+            if (enabled.Contains(MapObjectPicker) && pickerKey != DefaultMapObjectPickerKey)
+                Buffer.BlockCopy(BitConverter.GetBytes(pickerKey), 0, image, build.MapObjectPickerKeyOffset.Value, sizeof(int));
             return image;
         }
 
@@ -183,6 +261,8 @@ namespace PrisonQoL
             public string Name { get; private set; }
             internal readonly bool HasTyrStaffMorale;
             internal readonly string SourceHash;
+            internal readonly string OptionalFeature;
+            internal readonly Build OptionalLayout;
             internal readonly string AllFeaturesHash;
             internal readonly string TruckCapacity8AllFeaturesHash;
             internal readonly string TruckCapacity16AllFeaturesHash;
@@ -190,6 +270,7 @@ namespace PrisonQoL
             internal readonly bool HasTruckCapacityChoices;
             internal readonly string[] TruckModes;
             internal readonly int SourceLength;
+            internal readonly int? MapObjectPickerKeyOffset;
             private readonly byte[] tail;
             private readonly SourceSpanRecord appendFromSource;
             private readonly Dictionary<string, string[]> legacyOutputs;
@@ -199,16 +280,30 @@ namespace PrisonQoL
             internal readonly Edit[] CommonEdits;
             internal readonly Dictionary<string, Edit[]> Features;
 
-            internal Build(BuildRecord record, IEnumerable<string> expected)
+            internal Build(BuildRecord record, IEnumerable<string> expected, string optionalFeature = null)
             {
                 Name = record.name;
                 HasTyrStaffMorale = record.tyrStaffMoraleInstalled;
                 SourceHash = record.sourceSha256;
+                OptionalFeature = optionalFeature;
+                if (optionalFeature != null)
+                {
+                    var extension = record.optionalLayout;
+                    if (extension == null || extension.optionalLayout != null || extension.sourceSha256 != SourceHash ||
+                        extension.sourceLength != record.sourceLength || extension.tyrStaffMoraleInstalled != HasTyrStaffMorale ||
+                        (extension.legacyOutputs != null && extension.legacyOutputs.Count > 0))
+                        throw new InvalidDataException("附加补丁布局与原始游戏版本不一致。");
+                    OptionalLayout = new Build(extension, expected);
+                    if (!OptionalLayout.Features[optionalFeature].Any(edit => !edit.Before.SequenceEqual(edit.After)))
+                        throw new InvalidDataException("附加补丁缺少用于检测的游戏指令。");
+                    expected = expected.Where(id => id != optionalFeature);
+                }
                 AllFeaturesHash = record.allFeaturesSha256;
                 TruckCapacity8AllFeaturesHash = record.truckCapacity8AllFeaturesSha256;
                 TruckCapacity16AllFeaturesHash = record.truckCapacity16AllFeaturesSha256;
                 LongTruckFleetAllFeaturesHash = record.longTruckFleetAllFeaturesSha256;
                 SourceLength = record.sourceLength;
+                MapObjectPickerKeyOffset = record.mapObjectPickerKeyOffset;
                 tail = Convert.FromBase64String(record.append);
                 appendFromSource = record.appendFromSource;
                 CommonEdits = record.commonEdits.Select(entry => new Edit(entry)).ToArray();
@@ -241,13 +336,30 @@ namespace PrisonQoL
                     String.IsNullOrEmpty(LongTruckFleetAllFeaturesHash) || LongTruckFleetAllFeaturesHash.Length != 64 ||
                     Features[LongTruckFleet].Length == 0))
                     throw new InvalidDataException("原生长车补丁的依赖或校验记录无效。");
-                if (legacyOutputs.Any(entry => entry.Key.Length != 64 || entry.Value == null || entry.Value.Length == 0 ||
+                if (legacyOutputs.Any(entry => entry.Key.Length != 64 || entry.Value == null ||
                     entry.Value.Any(id => !Features.ContainsKey(id)) || TruckSelectionError(entry.Value) != null))
                     throw new InvalidDataException("旧补丁校验记录无效。");
                 if (appendFromSource != null && (appendFromSource.sourceOffset < 0 || appendFromSource.length <= 0 ||
                     (long)appendFromSource.sourceOffset + appendFromSource.length > SourceLength ||
                     appendFromSource.tailOffset < 0 || appendFromSource.tailOffset > tail.Length))
                     throw new InvalidDataException("补丁数据中的本地游戏数据范围无效。");
+                if (Features.ContainsKey(MapObjectPicker) != MapObjectPickerKeyOffset.HasValue ||
+                    MapObjectPickerKeyOffset.HasValue && !HasValidMapObjectPickerSlot(MapObjectPickerKeyOffset.Value))
+                    throw new InvalidDataException("地图物件取样的快捷键记录无效。");
+            }
+
+            private bool HasValidMapObjectPickerSlot(int offset)
+            {
+                if (offset < SourceLength || (long)offset + sizeof(int) > (long)SourceLength + OutputTailLength)
+                    return false;
+                var index = offset - SourceLength;
+                if (appendFromSource != null && (long)index + sizeof(int) > appendFromSource.tailOffset)
+                {
+                    if (index < (long)appendFromSource.tailOffset + appendFromSource.length)
+                        return false;
+                    index -= appendFromSource.length;
+                }
+                return BitConverter.ToInt32(tail, index) == DefaultMapObjectPickerKey;
             }
 
             internal bool TryGetLegacyFeatures(string checksum, out string[] selected)
@@ -305,8 +417,11 @@ namespace PrisonQoL
         {
             public int schema { get; set; }
             public string[] featureOrder { get; set; }
+            public string optionalFeature { get; set; }
             public BuildRecord[] builds { get; set; }
             public SignatureRecord[] tyrStaffMoraleSignatures { get; set; }
+            public CatalogRecord[] previousCatalogs { get; set; }
+            public CatalogRecord previousCatalog { get; set; }
         }
 
         public sealed class BuildRecord
@@ -314,6 +429,7 @@ namespace PrisonQoL
             public string name { get; set; }
             public string sourceSha256 { get; set; }
             public int sourceLength { get; set; }
+            public int? mapObjectPickerKeyOffset { get; set; }
             public string allFeaturesSha256 { get; set; }
             public string truckCapacity8AllFeaturesSha256 { get; set; }
             public string truckCapacity16AllFeaturesSha256 { get; set; }
@@ -324,6 +440,7 @@ namespace PrisonQoL
             public Dictionary<string, EditRecord[]> features { get; set; }
             public Dictionary<string, string[]> legacyOutputs { get; set; }
             public bool tyrStaffMoraleInstalled { get; set; }
+            public BuildRecord optionalLayout { get; set; }
         }
 
         public sealed class SignatureRecord
